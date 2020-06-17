@@ -28,7 +28,7 @@
  */
  
  
-#ifndef _STDINT_H
+#if !defined(_STDINT_H) && !defined(_STDINT)
 #define _STDINT_H
 #define __need_wint_t
 #define __need_wchar_t
