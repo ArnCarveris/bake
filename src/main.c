@@ -44,11 +44,13 @@ bool optimize = false;
 bool is_test = false;
 bool to_env = false;
 bool always_clone = false;
+bool fast_build = false;
 
 /* Command line project configuration */
 const char *id = NULL;
 bake_project_type type = BAKE_APPLICATION;
 bool private = false;
+bool static_lib = false;
 const char *artefact = NULL;
 const char *includes = NULL;
 const char *language = NULL;
@@ -111,12 +113,14 @@ void bake_usage(void)
     printf("  --language <language>        Specify a language for project (default = \"c\")\n");
     printf("  --artefact <binary>          Specify a binary file for project\n");
     printf("  -i,--includes <include path> Specify an include path for project\n");
+    printf("  --static                     Build statically linked version of binary\n");
     printf("  --private                    Specify a project to be private (not discoverable)\n");
     printf("\n");
     printf("  -a,--args [arguments]        Pass arguments to application (use with run)\n");
     printf("  --interactive                Rebuild project when files change (use with run)\n");
     printf("  --run-prefix                 Specify prefix command for run\n");
     printf("  --test-prefix                Specify prefix command for tests run by test\n");
+    printf("  --fast                       Don't add any instrumentations to test builds\n");
     printf("  -r,--recursive               Recursively build all dependencies of discovered projects\n");
     printf("  -t [id]                      Specify template for new project\n");
     printf("  -o [path]                    Specify output directory for new projects\n");
@@ -301,6 +305,7 @@ int bake_parse_args(
             ARG(0, "test", is_test = true);
             ARG(0, "to-env", to_env = true);
             ARG(0, "always-clone", always_clone = true);
+            ARG(0, "static", static_lib = true);
 
             ARG(0, "private", private = true);
             ARG('t', NULL, template = argv[i + 1]; i ++);
@@ -311,6 +316,7 @@ int bake_parse_args(
 
             ARG(0, "local", local_setup = true);
             ARG(0, "local-setup", ); /* deprecated */
+            ARG(0, "fast", fast_build = true);
             ARG(0, "run-prefix", run_prefix = argv[i + 1]; i++);
             ARG(0, "test-prefix", test_prefix = argv[i + 1]; i++);
             ARG('i', "interactive", interactive = true);
@@ -1170,7 +1176,7 @@ int bake_test_action(
 
     free (test_path);
     
-    return 0;
+    return result;
 error:
     return -1;
 }
@@ -1180,7 +1186,9 @@ int bake_runall_action(
     bake_config *config,
     bake_project *project)
 {
-    ut_try( bake_run(config, project->path, run_prefix, false, run_argc, run_argv), NULL);
+    ut_try( 
+        bake_run(config, project->path, run_prefix, false, run_argc, run_argv), 
+            NULL);
     return 0;
 error:
     return -1;
@@ -1333,6 +1341,7 @@ int main(int argc, const char *argv[]) {
         for (i = 0; i < argc; i ++) {
             ut_strbuf_append(&buf, "%s ", argv[i]);
         }
+        
         char *args = ut_strbuf_get(&buf);
         ut_ok("cmd  #[cyan]%s#[normal]", args);
         free(args);
@@ -1371,20 +1380,14 @@ int main(int argc, const char *argv[]) {
         .debug = true,
         .optimizations = false,
         .coverage = false,
-        .strict = false
+        .strict = false,
+        .static_lib = false
     };
 
     ut_tls_set(BAKE_CONFIG_KEY, &config);
 
     if (!action) {
         return 0;
-    }
-
-    if (strict) {
-        config.strict = true;
-    }
-    if (optimize) {
-        config.optimizations = true;
     }
 
     if (recursive) {
@@ -1407,6 +1410,18 @@ int main(int argc, const char *argv[]) {
     ut_log_push("config");
     ut_try (bake_config_load(&config, env, load_bundles), NULL);
     ut_log_pop();
+
+    if (strict) {
+        config.strict = true;
+    }
+    if (optimize) {
+        config.optimizations = true;
+    }
+    if (fast_build) {
+        config.coverage = false;
+        config.sanitize_memory = false;
+        config.sanitize_undefined = false;
+    }
 
 #ifndef UT_OS_WINDOWS
     if (is_bake_parent) {

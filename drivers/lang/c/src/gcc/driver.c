@@ -144,8 +144,7 @@ void add_flags(
 
     /* This macro is only set for source files of this project, and can be used
      * to exclude header statements for dependencies */
-    char *building_macro = ut_asprintf(" -D%s_IMPL", project->id_underscore);
-    strupper(building_macro);
+    char *building_macro = ut_asprintf(" -D%s_EXPORTS", project->id_underscore);
     ut_strbuf_appendstr(cmd, building_macro);
     free(building_macro);
 }
@@ -168,10 +167,22 @@ void add_std(
     }
 
     ut_strbuf_appendstr(cmd, " -Wall");
+    ut_strbuf_appendstr(cmd, " -Wextra");
+    ut_strbuf_appendstr(cmd, " -Wshadow");
 
     /* If strict, enable lots of warnings & treat warnings as errors */
     if (config->strict) {
-        ut_strbuf_appendstr(cmd, " -Werror -Wextra -pedantic");
+        ut_strbuf_appendstr(cmd, " -Werror -pedantic");
+    } else {
+        /* Unused parameters can sometimes indicate an error, but more often 
+         * than not are the result of a function implementing some kind of 
+         * interface and not using all of the arguments. Don't throw warning. */
+        ut_strbuf_appendstr(cmd, " -Wno-unused-parameter");  
+
+        /* GCC will sometimes throw warnings when using composite literals without 
+         * using a member name which seems overly paranoid, and clutters code
+         * unnecessarily */        
+        ut_strbuf_appendstr(cmd, " -Wno-missing-field-initializers");
     }
 }
 
@@ -197,6 +208,24 @@ void add_optimization(
 }
 
 static
+void add_sanitizers(
+    bake_config *config,
+    ut_strbuf *cmd)
+{
+    if (config->sanitize_memory) {
+        ut_strbuf_appendstr(cmd, " -fsanitize=address");
+    }
+
+    if (config->sanitize_undefined) {
+        ut_strbuf_appendstr(cmd, " -fsanitize=undefined");
+    }
+
+    if (config->sanitize_thread) {
+        ut_strbuf_appendstr(cmd, " -fsanitize=thread");
+    }    
+}
+
+static
 void add_misc(
     bake_driver_api *driver,
     bake_config *config,
@@ -215,6 +244,19 @@ void add_misc(
     if (config->coverage && project->coverage) {
         ut_strbuf_appendstr(cmd, " -fprofile-arcs -ftest-coverage");
     }
+
+    add_sanitizers(config, cmd);
+}
+
+static
+void add_misc_link(
+    bake_driver_api *driver,
+    bake_config *config,
+    bake_project *project,
+    bool cpp,
+    ut_strbuf *cmd)
+{
+    add_sanitizers(config, cmd);
 }
 
 /* Compile source file */
@@ -451,6 +493,13 @@ void link_dynamic_binary(
         }
     }
 
+    add_misc_link(
+        driver,
+        config,
+        project,
+        cpp,
+        &cmd);
+
     /* Set optimizations */
     if (config->optimizations) {
         if ((!is_clang(cpp) || !is_linux()) && !config->symbols) {
@@ -598,6 +647,14 @@ void link_dynamic_binary(
     char *cmdstr = ut_strbuf_get(&cmd);
     driver->exec(cmdstr);
     free(cmdstr);
+
+    if (is_dylib(driver, project)) {
+        ut_strbuf_append(&cmd, "install_name_tool -id @rpath/%s %s", 
+            project->artefact, target);
+        cmdstr = ut_strbuf_get(&cmd);
+        driver->exec(cmdstr);
+        free(cmdstr);
+    }
 
     /* If static libraries were unpacked, cleanup temporary directories */
     it = ut_ll_iter(static_object_paths);
@@ -908,7 +965,6 @@ void coverage(
     bake_config *config,
     bake_project *project)
 {
-    ut_strbuf cmd = UT_STRBUF_INIT, src = UT_STRBUF_INIT;
     int total_files = 0;
 
     char *tmp_dir = driver->get_attr_string("tmp-dir");
@@ -920,27 +976,26 @@ void coverage(
 
     while (ut_iter_hasNext(&it)) {
         char *file = ut_iter_next(&it);
-        ut_strbuf_append(&src, " %s", file);
+        ut_strbuf cmd = UT_STRBUF_INIT;
+        ut_strbuf_append(&cmd, "gcov --object-file %s/obj/%s %s/obj/%s", tmp_dir, file, tmp_dir, file);
+        char *cmdstr = ut_strbuf_get(&cmd);
+
+        int8_t rc;
+        int sig = ut_proc_cmd_stderr_only(cmdstr, &rc);
+        if (sig || rc) {
+            ut_error("failed to run gcov command '%s'", cmdstr);
+            project->error = 1;
+            return;
+        }
+
+        free(cmdstr);
+
         total_files ++;
     }
 
     if (!total_files) {
         ut_error("no source files to analyze for coverage report");
         project->error = true;
-        return;
-    }
-
-    char *srcstr = ut_strbuf_get(&src);
-    ut_strbuf_append(&cmd, 
-        "gcov --object-directory %s/obj %s", tmp_dir, srcstr);
-
-    char *cmdstr = ut_strbuf_get(&cmd);
-
-    int8_t rc;
-    int sig = ut_proc_cmd_stderr_only(cmdstr, &rc);
-    if (sig || rc) {
-        ut_error("failed to run gcov command '%s'", cmdstr);
-        project->error = 1;
         return;
     }
 
@@ -971,9 +1026,6 @@ void coverage(
         free(dst_file);
         total_gcov_files ++;
     }
-
-    free(cmdstr);
-    free(srcstr);
 
     if (!total_gcov_files) {
         ut_error("no gcov files");

@@ -56,7 +56,7 @@ int bake_test_run_single_test(
         case_id = test_id;
     }
 
-    int i, t;
+    uint32_t i, t;
     for (i = 0; i < suite_count; i ++) {
         bake_test_suite *suite = &suites[i];
 
@@ -95,10 +95,12 @@ int bake_test_run_single_test(
     }
 
     if (!found) {
-        fprintf(stderr, "testcase '%s' not found\n", testcase_id);
+        ut_log("testcase '%s' not found\n", testcase_id);
+        free(test_id);
         return -1;
     }
 
+    free(test_id);
     return 0;
 }
 
@@ -107,10 +109,10 @@ void print_dbg_command(
     const char *exec,
     const char *testcase) 
 {
-    printf("To run/debug your test, do:\n");
+    ut_log("To run/debug your test, do:\n");
     ut_log("export $(bake env)#[reset]\n");
     ut_log("%s %s#[reset]\n", exec, testcase);
-    printf("\n");
+    ut_log("\n");
 }
 
 static
@@ -122,7 +124,7 @@ void bake_test_report(
     uint32_t pass)
 {
     if (!pass && !fail && !empty) {
-        printf("    : no testcases to run     (%s.%s)\n", test_id, suite_id);
+        ut_log("    : no testcases to run     (%s.%s)\n", test_id, suite_id);
     } else {
         if (fail) {
             if (empty) {
@@ -157,14 +159,14 @@ int bake_test_run_all_tests(
     uint32_t fail = 0, empty = 0, pass = 0;
     const char *prefix = ut_getenv("BAKE_TEST_PREFIX");
 
-    printf("\n");
+    ut_log("\n");
 
-    int i, t;
+    uint32_t i, t;
     for (i = 0; i < suite_count; i ++) {
         bake_test_suite *suite = &suites[i];
 
         if (i && (fail || empty)) {
-            printf("\n");
+            ut_log("\n");
         }
 
         fail = 0;
@@ -174,7 +176,7 @@ int bake_test_run_all_tests(
         for (t = 0; t < suite->testcase_count; t ++) {
             bake_test_case *test = &suite->testcases[t];
 
-            char *test_id = ut_asprintf("%s.%s", suite->id, test->id);
+            char *test_name = ut_asprintf("%s.%s", suite->id, test->id);
             ut_proc proc;
             int8_t rc;
             int sig;
@@ -183,7 +185,7 @@ int bake_test_run_all_tests(
                 char *has_space = strchr(prefix, ' ');
                 if (has_space) {
                     ut_strbuf cmd = UT_STRBUF_INIT;
-                    ut_strbuf_append(&cmd, "%s %s %s", prefix, exec, test_id);
+                    ut_strbuf_append(&cmd, "%s %s %s", prefix, exec, test_name);
                     char *cmd_str = ut_strbuf_get(&cmd);
                     sig = ut_proc_cmd(cmd_str, &rc);
                     free(cmd_str);
@@ -191,7 +193,7 @@ int bake_test_run_all_tests(
                     proc = ut_proc_run(prefix, (const char*[]){
                         prefix,
                         exec,
-                        test_id, 
+                        test_name, 
                         NULL
                     }); 
 
@@ -200,7 +202,7 @@ int bake_test_run_all_tests(
             } else {
                 proc = ut_proc_run(exec, (const char*[]){
                     exec, 
-                    test_id, 
+                    test_name, 
                     NULL
                 });
 
@@ -211,14 +213,14 @@ int bake_test_run_all_tests(
                 if (sig) {
                     if (sig == 6) {
                         ut_log(
-                            "#[red]FAIL#[reset]: %s aborted\n", test_id);
+                            "#[red]FAIL#[reset]: %s aborted\n", test_name);
                     } else if (sig == 11) {
                         ut_log(
-                            "#[red]FAIL#[reset]: %s segfaulted\n", test_id);
+                            "#[red]FAIL#[reset]: %s segfaulted\n", test_name);
                     } else {
                         ut_log(
                             "#[red]FAIL#[reset]: %s crashed with signal %d\n", 
-                            test_id, sig);
+                            test_name, sig);
                     }
                     result = -1;
                     fail ++;
@@ -230,20 +232,20 @@ int bake_test_run_all_tests(
                     } else if (rc != -1) {
                         /* If return code is not -1, this was not a simple
                          * testcase failure (which already has been reported) */
-                        fprintf(stderr, 
-                            "Testcase '%s' failed with return code %d\n", 
-                            test_id, rc);
+                        ut_log("Testcase '%s' failed with return code %d\n", 
+                            test_name, rc);
 
                         result = -1;
                         fail ++;
                     } else {
                         /* Normal test failure */
+                        result = -1;
                         fail ++;
                     }
                 }
 
                 ut_catch();
-                print_dbg_command(exec, test_id);
+                print_dbg_command(exec, test_name);
             } else {
                 if (ut_log_verbosityGet() <= UT_OK) {
                     ut_log("#[green]PASS#[reset] %s.%s\n", 
@@ -260,9 +262,9 @@ int bake_test_run_all_tests(
         total_pass += pass;
     }
 
-    printf("-----------------------------\n");
+    ut_log("-----------------------------\n");
     bake_test_report(test_id, "all", total_fail, total_empty, total_pass);
-    printf("\n");
+    ut_log("\n");
 
     return result;
 }
@@ -367,8 +369,8 @@ void _test_bool(
 }
 
 void _test_int(
-    uint64_t v1,
-    uint64_t v2,
+    int64_t v1,
+    int64_t v2,
     const char *str_v1,
     const char *str_v2,
     const char *file,
@@ -388,6 +390,38 @@ void _test_int(
             sv2 = strdup(str_v2);
         } else {
             sv2 = ut_asprintf("%s (%lld)", str_v2, v2);
+        }
+
+        char *msg = ut_asprintf("%s != %s", sv1, sv2);
+        test_fail(file, line, msg);
+        free(msg);
+        free(sv1);
+        free(sv2);
+    }
+}
+
+void _test_uint(
+    uint64_t v1,
+    uint64_t v2,
+    const char *str_v1,
+    const char *str_v2,
+    const char *file,
+    int line)
+{
+    current_testsuite->assert_count ++;
+
+    if (v1 != v2) {
+        char *sv1, *sv2;
+        if (isdigit(*str_v1) || (*str_v1 == '-')) {
+            sv1 = strdup(str_v1);
+        } else {
+            sv1 = ut_asprintf("%s (%llu)", str_v1, v1);
+        }
+
+        if (isdigit(*str_v2) || (*str_v2 == '-')) {
+            sv2 = strdup(str_v2);
+        } else {
+            sv2 = ut_asprintf("%s (%llu)", str_v2, v2);
         }
 
         char *msg = ut_asprintf("%s != %s", sv1, sv2);
