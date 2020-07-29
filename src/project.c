@@ -372,7 +372,10 @@ int16_t bake_project_parse_value(
         } else
         if (!strcmp(member, "coverage")) {
            ut_try (bake_json_set_boolean(&p->coverage, member, v), NULL);
-        } else        
+        } else   
+        if (!strcmp(member, "amalgamate")) {
+           ut_try (bake_json_set_boolean(&p->amalgamate, member, v), NULL);
+        } else                
         if (!strcmp(member, "author")) {
             ut_try (bake_json_set_string(&p->author, member, v), NULL);
         } else
@@ -858,6 +861,14 @@ int16_t bake_project_init(
     if (project->artefact) {
         bake_project_init_artefact(config, project);
     }
+
+    /* Amalgamate driver isn't working correctly on Windows yet */
+#ifndef UT_OS_WINDOWS
+    if (project->amalgamate) {
+        ut_try( bake_project_load_driver(
+            project, "amalgamate", NULL), "failed to load amalgamate driver");        
+    }
+#endif
 
     project->bin_path = ut_asprintf(
         "%s"UT_OS_PS"bin", project->path);

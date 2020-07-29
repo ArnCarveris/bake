@@ -123,7 +123,7 @@ void add_flags(
             }
         }
     } else {
-        /* CXXFLAGS for c4cpp projects */
+        /* CXXFLAGS for c++ projects */
         bake_attr *flags_attr = driver->get_attr("cxxflags");
         if (flags_attr) {
             ut_iter it = ut_ll_iter(flags_attr->is.array);
@@ -131,6 +131,16 @@ void add_flags(
                 bake_attr *el = ut_iter_next(&it);
                 ut_strbuf_append(cmd, " %s", el->is.string);
             }
+        }
+    }
+
+    /* Add defines */
+    bake_attr *def_attr = driver->get_attr("defines");
+    if (def_attr) {
+        ut_iter it = ut_ll_iter(def_attr->is.array);
+        while (ut_iter_hasNext(&it)) {
+            bake_attr *el = ut_iter_next(&it);
+            ut_strbuf_append(cmd, " -D%s", el->is.string);
         }
     }
 
@@ -168,11 +178,12 @@ void add_std(
 
     ut_strbuf_appendstr(cmd, " -Wall");
     ut_strbuf_appendstr(cmd, " -Wextra");
-    ut_strbuf_appendstr(cmd, " -Wshadow");
 
     /* If strict, enable lots of warnings & treat warnings as errors */
     if (config->strict) {
-        ut_strbuf_appendstr(cmd, " -Werror -pedantic");
+        /* Enable pedantic errors in strict mode. Only enable -Wshadow in strict
+         * as this can generate loads of warnings for legacy compilers */
+        ut_strbuf_appendstr(cmd, " -Werror -Wshadow -pedantic");
     } else {
         /* Unused parameters can sometimes indicate an error, but more often 
          * than not are the result of a function implementing some kind of 
