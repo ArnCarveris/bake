@@ -194,7 +194,7 @@ int ut_proc_cmd_intern(
             *ptr = '\0';
             newArg = true;
         } else if (newArg) {
-            args[++argCount] = ptr;
+            args[++argCount] = ptr - (ptr[-1] == '"');
             newArg = false;
         }
     }
