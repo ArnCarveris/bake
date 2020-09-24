@@ -324,11 +324,16 @@ int16_t bake_build_make_project(
       strarg("%s" UT_OS_PS UT_OS_LIB_PREFIX "%s" UT_OS_LIB_EXT, bin_path, artefact)),
         "failed to move '%s' to project bin path", id);
 
-    /* On Windows, also copy the .lib file */
+    /* On Windows, also copy the .lib and pdb file */
 #ifdef _WIN32
     ut_try(ut_rename(
         strarg("%s" UT_OS_PS UT_OS_LIB_PREFIX "%s.lib", path, artefact),
         strarg("%s" UT_OS_PS UT_OS_LIB_PREFIX "%s.lib", bin_path, artefact)),
+            "failed to move '%s' to project bin path", id);
+
+    ut_try(ut_rename(
+        strarg("%s" UT_OS_PS UT_OS_LIB_PREFIX "%s.pdb", path, artefact),
+        strarg("%s" UT_OS_PS UT_OS_LIB_PREFIX "%s.pdb", bin_path, artefact)),
             "failed to move '%s' to project bin path", id);
 #endif
     free(bin_path);
@@ -416,6 +421,13 @@ int16_t bake_setup(
 
     bake_message(UT_OK, "done", "copy bake executable");
 
+#ifdef _WIN32
+    /* Copy bake pdb to bake environment in user working directory */
+    ut_try( ut_cp("./bake.pdb", "~/bake/" BAKE_EXEC ".pdb"),
+        "failed to copy bake pdb");
+
+    bake_message(UT_OK, "done", "copy bake pdb");
+#endif
     /* Reset bake environment */
     ut_try (bake_reset(config), NULL);
     bake_message(UT_OK, "done", "bake environment reset");

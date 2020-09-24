@@ -9,4 +9,6 @@ bin
 *.dll
 *.obj
 *.exp
+*.ilk
+*.pdb
 bake
