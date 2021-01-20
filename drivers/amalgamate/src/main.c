@@ -1,6 +1,9 @@
 #include <bake.h>
 #include <bake_amalgamate.h>
 
+BAKE_AMALGAMATE_API 
+int bakemain(bake_driver_api *driver);
+
 // If longer, bad
 #define MAX_LINE_LENGTH (256) 
 
@@ -73,11 +76,12 @@ int amalgamate(
     const char *const_file,
     ut_rb files_parsed) 
 {
-    if (ut_rb_find(files_parsed, const_file)) {
+    char *file = ut_strdup(const_file);
+    ut_path_clean(file, file);
+    if (ut_rb_find(files_parsed, file)) {
+        free(file);
         return 0;
     }
-
-    char *file = ut_strdup(const_file);
 
     ut_rb_set(files_parsed, file, file);
 
@@ -181,6 +185,10 @@ void generate(
     bake_config *config,
     bake_project *project_obj)
 {
+    if (project_obj->recursive) {
+        return;
+    }
+
     ut_rb files_parsed = ut_rb_new(compare_string, NULL);
     const char *project = project_obj->id_underscore;
     char *project_upper = ut_strdup(project_obj->id_underscore);
@@ -205,7 +213,7 @@ void generate(
     }
 
     ut_strbuf include_out_buf = UT_STRBUF_INIT;
-    ut_strbuf_append(&include_out_buf, "%s.h", project);
+    ut_strbuf_append(&include_out_buf, "%s/%s.h", project_path, project);
     char *include_out = ut_strbuf_get(&include_out_buf);
 
     /* Create amalgamated header file */
@@ -216,7 +224,7 @@ void generate(
     }
 
     /* If file is embedded, the code should behave like a static library */
-    fprintf(header_out, "#define %s_STATIC\n", project_upper);
+    fprintf(header_out, "#define %s_STATIC\n", project_obj->id_underscore);
     ut_try(amalgamate(header_out, include_path, true, include_file, files_parsed), NULL);
     fclose(header_out);
 
@@ -224,7 +232,7 @@ void generate(
     char *src_path = combine_path(project_path, "src");
 
     ut_strbuf src_out_buf = UT_STRBUF_INIT;
-    ut_strbuf_append(&src_out_buf, "%s.c", project);
+    ut_strbuf_append(&src_out_buf, "%s/%s.c", project_path, project);
     char *src_file_out = ut_strbuf_get(&src_out_buf);
 
     /* Create amalgamated header file */
@@ -235,7 +243,9 @@ void generate(
     }
 
     /* If specified, include main header file */
+    fprintf(src_out, "#ifndef %s_IMPL\n", project_upper);
     fprintf(src_out, "#include \"%s.h\"\n", project);
+    fprintf(src_out, "#endif\n");
 
     ut_iter it;
     ut_try(ut_dir_iter(src_path, "//*.c,*.cpp", &it), NULL);
@@ -257,7 +267,6 @@ error:
     project_obj->error = true;
 }
 
-BAKE_AMALGAMATE_EXPORT 
 int bakemain(bake_driver_api *driver) {
     driver->generate(generate);
     return 0;

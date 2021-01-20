@@ -28,13 +28,13 @@
 #define UT_BASE_H
 
 #if UT_IMPL && defined _MSC_VER
-#define UT_EXPORT __declspec(dllexport)
+#define UT_API __declspec(dllexport)
 #elif UT_IMPL
-#define UT_EXPORT __attribute__((__visibility__("default")))
+#define UT_API __attribute__((__visibility__("default")))
 #elif defined _MSC_VER
-#define UT_EXPORT __declspec(dllimport)
+#define UT_API __declspec(dllimport)
 #else
-#define UT_EXPORT
+#define UT_API
 #endif
 
 #ifndef __ANDROID__
@@ -59,7 +59,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
 #include <signal.h>
 
 /* OS-specific headers */
@@ -67,7 +66,7 @@
 #include <windows.h>
 #include <versionhelpers.h>
 #include <shlwapi.h>
-#include "bake-util/win/stdint.h"
+#include <stdint.h>
 #else
 #include <fnmatch.h>
 #include <inttypes.h>
@@ -141,12 +140,14 @@ extern "C" {
 /* Maximum number of code frames in logmsg */
 #define UT_MAX_LOG_CODEFRAMES (16)
 
-#ifndef __cplusplus
-/* Boolean definitions (compatible with C++ and C99 stdbool) */
+#include <stdbool.h>
+
+/* The API uses the native bool type in C++, or a custom one in C */
+#if !defined(__cplusplus) && !defined(__bool_true_false_are_defined)
 #undef bool
 #undef true
 #undef false
-#define bool char
+typedef char bool;
 #define false 0
 #define true !false
 #endif
@@ -244,21 +245,21 @@ struct jsw_rbtrav {
 };
 
 /* Global variables */
-UT_EXPORT 
+UT_API 
 extern int8_t UT_APP_STATUS;
 
-UT_EXPORT 
+UT_API 
 extern int8_t UT_LOG_BACKTRACE;
 
-UT_EXPORT
+UT_API
 void ut_init(
     const char *appName);
 
-UT_EXPORT
+UT_API
 void ut_deinit(void);
 
-UT_EXPORT
-const char* ut_appname();
+UT_API
+const char* ut_appname(void);
 
 #ifdef __cplusplus
 }

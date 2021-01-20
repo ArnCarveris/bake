@@ -61,6 +61,8 @@ struct bake_config {
     bool sanitize_memory;       /* Enable memory sanitizer (if supported) */
     bool sanitize_thread;       /* Enable thread sanitizer (if supported) */
     bool sanitize_undefined;    /* Enable UB sanitizier (if supported) */
+    bool loop_test;             /* Enable analysis for SIMD loops */
+    bool assembly;              /* Enable assembly output */
 
     /* Environment attribubtes */
     ut_ll env_variables;        /* List with environment variable names */
@@ -69,6 +71,9 @@ struct bake_config {
     /* Bundle information */
     ut_ll bundles;           /* Bundles loaded by bake */
     ut_rb repositories;      /* Repositories loaded from bundles */
+
+    /* Custom defines */
+    ut_ll defines;
 
     /* Set by configuration loader */
     char *home;              /* $BAKE_HOME */

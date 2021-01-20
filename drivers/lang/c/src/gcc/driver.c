@@ -144,6 +144,15 @@ void add_flags(
         }
     }
 
+    /* Add defines from config */
+    if (config->defines) {
+        ut_iter it = ut_ll_iter(config->defines);
+        while (ut_iter_hasNext(&it)) {
+            const char *el = ut_iter_next(&it);
+            ut_strbuf_append(cmd, " -D%s", el);
+        }
+    }
+
     /* Enable debugging code */
     if (!config->debug) {
         ut_strbuf_appendstr(cmd, " -DNDEBUG");
@@ -172,18 +181,32 @@ void add_std(
         ut_strbuf_append(cmd, " -std=%s",
             driver->get_attr_string("cpp-standard"));
     } else {
-        ut_strbuf_append(cmd, " -std=%s -D_XOPEN_SOURCE=600",
+        ut_strbuf_append(cmd, " -std=%s ",
             driver->get_attr_string("c-standard"));
+        ut_strbuf_append(cmd, " -D_XOPEN_SOURCE=600");
     }
 
-    ut_strbuf_appendstr(cmd, " -Wall");
-    ut_strbuf_appendstr(cmd, " -Wextra");
+    ut_strbuf_appendstr(cmd, " -Wall -W -Wextra");
 
     /* If strict, enable lots of warnings & treat warnings as errors */
     if (config->strict) {
-        /* Enable pedantic errors in strict mode. Only enable -Wshadow in strict
-         * as this can generate loads of warnings for legacy compilers */
-        ut_strbuf_appendstr(cmd, " -Werror -Wshadow -pedantic");
+        /* Enable lots of warnings in strict mode */
+        ut_strbuf_appendstr(cmd, " -Werror -Wshadow -Wconversion -Wwrite-strings");
+        ut_strbuf_appendstr(cmd, " -Wredundant-decls -pedantic");
+        ut_strbuf_appendstr(cmd, " -Wunused-parameter -Wsign-compare -Wcast-align"); 
+        ut_strbuf_appendstr(cmd, " -Wparentheses -Wsequence-point -Wpointer-arith");
+        ut_strbuf_appendstr(cmd, " -Wredundant-decls -Wdisabled-optimization");
+
+        /* These warnings are not valid for C++ */
+        if (!cpp) {
+            ut_strbuf_appendstr(cmd, " -Wstrict-prototypes -Wnested-externs");
+        }
+        
+        /* If project is a package, it should not contain global functions
+         * without a declaration. */
+        if (project->type == BAKE_PACKAGE) {
+            ut_strbuf_appendstr(cmd, " -Wmissing-declarations");
+        }
     } else {
         /* Unused parameters can sometimes indicate an error, but more often 
          * than not are the result of a function implementing some kind of 
@@ -208,7 +231,12 @@ void add_optimization(
     /* Enable full optimizations, including cross-file */
     if (config->optimizations) {
         if ((!is_clang(cpp) || !is_linux()) && !config->symbols) {
-            ut_strbuf_appendstr(cmd, " -O3 -flto");
+            ut_strbuf_appendstr(cmd, " -O3");
+
+            /* LTO can hide warnings */
+            if (!config->strict) {
+                ut_strbuf_appendstr(cmd, " -flto");
+            }
         } else {
             /* On some Linux versions clang has trouble loading the LTO plugin */
             ut_strbuf_appendstr(cmd, " -O3");
@@ -245,7 +273,10 @@ void add_misc(
     ut_strbuf *cmd)
 {
     /* In obscure cases with static libs, stack protector can cause unresolved symbols */
-    ut_strbuf_append(cmd, " -fPIC -fno-stack-protector");
+    ut_strbuf_append(cmd, 
+        " -fPIC"
+        " -fvisibility=hidden"
+        " -fno-stack-protector");
 
     /* Include debugging information */
     if (config->symbols) {
@@ -254,6 +285,20 @@ void add_misc(
 
     if (config->coverage && project->coverage) {
         ut_strbuf_appendstr(cmd, " -fprofile-arcs -ftest-coverage");
+    }
+
+    if (config->loop_test) {
+        if (is_clang(cpp)) {
+            ut_strbuf_append(cmd,
+                " -Rpass-missed=loop-vectorize");
+        } else {
+            ut_strbuf_append(cmd,
+                " -fopt-info-vec-missed");
+        }
+    }
+
+    if (config->assembly) {
+        ut_strbuf_append(cmd, " -S -fverbose-asm");
     }
 
     add_sanitizers(config, cmd);
@@ -309,7 +354,7 @@ void compile_src(
      * language as the project configuration. Header compiled with different
      * compiler settings cannot be included */
     if (!file_has_different_language) {
-        if (driver->get_attr_bool("precompile-header")) {
+        if (driver->get_attr_bool("precompile-header") && !config->assembly) {
             if (is_clang(cpp)) {
                 char *pch_dir = driver->get_attr_string("pch-dir");
                 ut_strbuf_append(&cmd, " -include %s/%s/%s.h", 
@@ -326,7 +371,11 @@ void compile_src(
     add_includes(driver, config, project, &cmd);
 
     /* Add source file and object file */
-    ut_strbuf_append(&cmd, " -c %s -o %s", source, target);
+    ut_strbuf_append(&cmd, " -c %s", source);
+
+    if (!config->assembly) {
+        ut_strbuf_append(&cmd, " -o %s", target);
+    }
 
     /* Execute command */
     char *cmdstr = ut_strbuf_get(&cmd);
@@ -341,6 +390,10 @@ void generate_precompiled_header(
     bake_project *project)
 {   
     bool cpp = is_cpp(project);
+
+    if (config->assembly) {
+        return;
+    }
 
     if (!is_clang(cpp)) {
         return;
@@ -363,10 +416,7 @@ void generate_precompiled_header(
 
     /* Add source file and object file */
     ut_strbuf_append(&cmd, 
-        "%s -x %s-header %s -o %s", 
-        cc(cpp), 
-        cpp ? "c++" : "c",
-        source, target);
+        "%s -x %s-header %s -o %s", cc(cpp), cpp ? "c++" : "c", source, target);
 
     free(target);
     free(source);
@@ -484,9 +534,13 @@ void link_dynamic_binary(
     bool hide_symbols = false;
     ut_ll static_object_paths = NULL;
 
+    if (config->assembly) {
+        return;
+    }
+
     bool cpp = is_cpp(project);
 
-    ut_strbuf_append(&cmd, "%s -Wall -fPIC", cc(cpp));
+    ut_strbuf_append(&cmd, "%s -Wall", cc(cpp));
 
     if (project->type == BAKE_PACKAGE) {
         /* Set symbol visibility */
@@ -513,11 +567,9 @@ void link_dynamic_binary(
 
     /* Set optimizations */
     if (config->optimizations) {
-        if ((!is_clang(cpp) || !is_linux()) && !config->symbols) {
-            ut_strbuf_appendstr(&cmd, " -O3 -flto");
-        } else {
-            /* On some Linux versions clang has trouble loading the LTO plugin */
-            ut_strbuf_appendstr(&cmd, " -O3");
+        ut_strbuf_appendstr(&cmd, " -O3 -flto");
+        if (!config->strict) {
+            ut_strbuf_appendstr(&cmd, " -flto");
         }
     } else {
         ut_strbuf_appendstr(&cmd, " -O0");

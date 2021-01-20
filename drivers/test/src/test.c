@@ -253,6 +253,8 @@ int bake_test_run_all_tests(
                 }
                 pass ++;
             }
+
+            free(test_name);
         }
 
         bake_test_report(test_id, suite->id, fail, empty, pass);
@@ -288,7 +290,7 @@ int bake_test_run(
 static
 void test_fail(
     const char *file,
-    uint32_t line,
+    int32_t line,
     const char *err)
 {
     if (!current_testsuite) {

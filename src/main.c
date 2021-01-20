@@ -39,8 +39,13 @@ bool build = true;
 bool test = false;
 bool local_setup = false;
 bool load_bundles = false;
+
+/* Override configuration */
 bool strict = false;
 bool optimize = false;
+bool loop_test = false;
+bool assembly = false;
+
 bool is_test = false;
 bool to_env = false;
 bool always_clone = false;
@@ -56,6 +61,7 @@ const char *includes = NULL;
 const char *language = NULL;
 const char *template = NULL;
 const char *output_dir = NULL;
+ut_ll defines = NULL;
 
 /* Command specific parameters */
 const char *export_expr = NULL;
@@ -78,11 +84,13 @@ bool show_repositories = false;
                 if (!strcmp(&argv[i][2], long ? long : "")) {\
                     action;\
                     parsed = true;\
+                    continue;\
                 }\
             } else {\
-                if (short && argv[i][1] == short) {\
+                if (short && argv[i][1] == short && (argv[i][2] == ' ' || argv[i][2] == '\0')) {\
                     action;\
                     parsed = true;\
+                    continue;\
                 }\
             }\
         }\
@@ -101,6 +109,7 @@ void bake_usage(void)
     printf("  --env <environment>          Specify environment id\n");
     printf("  --strict                     Manually enable strict compiler options\n");
     printf("  --optimize                   Manually enable compiler optimizations\n");
+    printf("  --loop-test                  Manually enable vectorization analysis\n");
     printf("\n");
     printf("  --package                    Set the project type to package\n");
     printf("  --template                   Set the project type to template\n");
@@ -115,6 +124,7 @@ void bake_usage(void)
     printf("  -i,--includes <include path> Specify an include path for project\n");
     printf("  --static                     Build statically linked version of binary\n");
     printf("  --private                    Specify a project to be private (not discoverable)\n");
+    printf("  -D, --define <var[=value]>   Add define to build\n");
     printf("\n");
     printf("  -- [arguments]               Pass arguments to application (use with run)\n");
     printf("  --interactive                Rebuild project when files change (use with run)\n");
@@ -280,17 +290,21 @@ int bake_parse_args(
     int argc,
     const char *argv[])
 {
-    int i = 1;
     bool action_set = false;
+    defines = ut_ll_new();
 
-    for (; i < argc; i ++) {
+    int i;
+    for (i = 1; i < argc; i ++) {
         if (argv[i][0] == '-') {
             bool parsed = false;
+
             ARG(0, "env", env = argv[i + 1]; i ++);
             ARG(0, "cfg", cfg = argv[i + 1]; i ++);
             ARG(0, "arch", arch = argv[i + 1]; i ++);
             ARG(0, "strict", strict = true;);
             ARG(0, "optimize", optimize = true; i ++);
+            ARG(0, "loop-test", loop_test = true );
+            ARG(0, "assembly", assembly = true );
 
             ARG(0, "trace", ut_log_verbositySet(UT_TRACE));
             ARG(0, "debug", ut_log_verbositySet(UT_DEBUG));
@@ -311,6 +325,7 @@ int bake_parse_args(
             ARG(0, "language", language = argv[i + 1]; i ++);
             ARG(0, "artefact", artefact = argv[i + 1]; i ++);
             ARG(0, "includes", includes = argv[i + 1]; i ++);
+            ARG('D', "defines", ut_ll_append(defines, (char*)argv[i + 1]); i ++);
 
             ARG(0, "local", local_setup = true);
             ARG(0, "local-setup", ); /* deprecated */
@@ -1416,11 +1431,21 @@ int main(int argc, const char *argv[]) {
     if (optimize) {
         config.optimizations = true;
     }
+    if (loop_test) {
+        config.loop_test = true;
+    }
+    if (assembly) {
+        config.assembly = true;
+    }
     if (fast_build) {
         config.coverage = false;
         config.sanitize_memory = false;
         config.sanitize_undefined = false;
     }
+
+    config.defines = defines;
+
+    bake_config_log(&config);
 
 #ifndef UT_OS_WINDOWS
     if (is_bake_parent) {
